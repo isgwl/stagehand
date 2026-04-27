@@ -76,7 +76,9 @@ const startRouteHandler: RouteHandler = withErrorHandling(
     }
 
     // Use the validated request body directly - fields come from Api.SessionStartRequestSchema
-    const body = request.body as Api.SessionStartRequest;
+    const body = request.body as Api.SessionStartRequest & {
+      humanBehavior?: unknown;
+    };
     const {
       modelName,
       domSettleTimeoutMs,
@@ -84,6 +86,7 @@ const startRouteHandler: RouteHandler = withErrorHandling(
       systemPrompt,
       browserbaseSessionCreateParams,
       selfHeal,
+      humanBehavior,
       waitForCaptchaSolves,
       browserbaseSessionID,
       experimental,
@@ -216,6 +219,7 @@ const startRouteHandler: RouteHandler = withErrorHandling(
       systemPrompt,
       browserbaseSessionCreateParams,
       selfHeal,
+      humanBehavior,
       waitForCaptchaSolves,
       clientLanguage,
       sdkVersion,

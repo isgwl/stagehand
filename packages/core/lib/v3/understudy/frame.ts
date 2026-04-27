@@ -4,6 +4,8 @@ import type { CDPSessionLike } from "./cdp.js";
 import { Locator } from "./locator.js";
 import { StagehandEvalError } from "../types/public/sdkErrors.js";
 import { executionContexts } from "./executionContextRegistry.js";
+import type { HumanBehaviorInput } from "../types/public/page.js";
+import type { HumanPointerState } from "./humanBehavior.js";
 
 interface FrameManager {
   session: CDPSessionLike;
@@ -28,6 +30,8 @@ export class Frame implements FrameManager {
     public frameId: string,
     public pageId: string,
     private readonly remoteBrowser: boolean,
+    private readonly humanBehavior?: HumanBehaviorInput,
+    private readonly pointerState?: HumanPointerState,
   ) {
     this.sessionId = this.session.id ?? null;
   }
@@ -35,6 +39,14 @@ export class Frame implements FrameManager {
   /** True when the controlled browser runs on a different machine. */
   public isBrowserRemote(): boolean {
     return this.remoteBrowser;
+  }
+
+  public getHumanBehavior(): HumanBehaviorInput | undefined {
+    return this.humanBehavior;
+  }
+
+  public getPointerState(): HumanPointerState | undefined {
+    return this.pointerState;
   }
 
   /** DOM.getNodeForLocation → DOM.describeNode */
@@ -249,6 +261,8 @@ export class Frame implements FrameManager {
             tree.frame.id,
             this.pageId,
             this.remoteBrowser,
+            this.humanBehavior,
+            this.pointerState,
           ),
         );
       }

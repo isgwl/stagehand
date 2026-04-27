@@ -21,3 +21,49 @@ export type SnapshotResult = {
 export type PageSnapshotOptions = {
   includeIframes?: boolean;
 };
+
+export type HumanBehaviorPreset = "fast" | "balanced" | "careful";
+
+export type HumanDelayRange = {
+  min: number;
+  max: number;
+};
+
+export type HumanDelay = number | HumanDelayRange;
+
+export type HumanMouseOptions = {
+  enabled?: boolean;
+  durationMs?: HumanDelay;
+  steps?: number;
+  jitter?: number;
+  overshoot?: boolean;
+  settleDelayMs?: HumanDelay;
+  pressDelayMs?: HumanDelay;
+  clickDelayMs?: HumanDelay;
+};
+
+export type HumanTypingOptions = {
+  enabled?: boolean;
+  delayMs?: HumanDelay;
+  wordPauseMs?: HumanDelay;
+  mistakeChance?: number;
+  mistakeDelayMs?: HumanDelay;
+};
+
+export type HumanScrollOptions = {
+  enabled?: boolean;
+  chunkSize?: HumanDelay;
+  delayMs?: HumanDelay;
+  jitter?: number;
+};
+
+export type HumanBehaviorOptions = {
+  preset?: HumanBehaviorPreset;
+  seed?: number;
+  mouse?: HumanMouseOptions;
+  typing?: HumanTypingOptions;
+  scroll?: HumanScrollOptions;
+  actionDelayMs?: HumanDelay;
+};
+
+export type HumanBehaviorInput = boolean | HumanBehaviorOptions;

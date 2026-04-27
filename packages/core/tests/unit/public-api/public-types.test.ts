@@ -82,6 +82,14 @@ type ExpectedExportedTypes = {
   PuppeteerPage: Stagehand.PuppeteerPage;
   ConsoleListener: Stagehand.ConsoleListener;
   LoadState: Stagehand.LoadState;
+  HumanBehaviorPreset: Stagehand.HumanBehaviorPreset;
+  HumanDelayRange: Stagehand.HumanDelayRange;
+  HumanDelay: Stagehand.HumanDelay;
+  HumanMouseOptions: Stagehand.HumanMouseOptions;
+  HumanTypingOptions: Stagehand.HumanTypingOptions;
+  HumanScrollOptions: Stagehand.HumanScrollOptions;
+  HumanBehaviorOptions: Stagehand.HumanBehaviorOptions;
+  HumanBehaviorInput: Stagehand.HumanBehaviorInput;
   // Types from LLMClient.ts
   ChatMessage: Stagehand.ChatMessage;
   ChatMessageContent: Stagehand.ChatMessageContent;

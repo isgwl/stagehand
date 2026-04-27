@@ -17,6 +17,7 @@ import {
   LoadState,
   SnapshotResult,
   PageSnapshotOptions,
+  HumanBehaviorInput,
 } from "../types/public/page.js";
 import { NetworkManager } from "./networkManager.js";
 import { LifecycleWatcher } from "./lifecycleWatcher.js";
@@ -56,6 +57,17 @@ import {
 } from "./screenshotUtils.js";
 import { InitScriptSource } from "../types/private/index.js";
 import { withTimeout } from "../timeoutConfig.js";
+import {
+  dispatchHumanClick,
+  dispatchHumanMouseMove,
+  dispatchHumanScroll,
+  HumanPointerState,
+  maybeHumanDelay,
+  normalizeHumanBehavior,
+  randomForBehavior,
+  resolveDelay,
+  sleep,
+} from "./humanBehavior.js";
 
 /**
  * Page
@@ -114,6 +126,7 @@ export class Page {
   /** Document-start scripts installed across every session this page owns. */
   private readonly initScripts: string[] = [];
   private extraHTTPHeaders: Record<string, string>;
+  private readonly pointerState = new HumanPointerState();
 
   private constructor(
     private readonly conn: CdpConnection,
@@ -122,6 +135,7 @@ export class Page {
     mainFrameId: string,
     apiClient?: StagehandAPIClient | null,
     browserIsRemote = false,
+    private readonly humanBehavior?: HumanBehaviorInput,
   ) {
     this.pageId = _targetId;
     this.apiClient = apiClient ?? null;
@@ -139,6 +153,8 @@ export class Page {
       mainFrameId,
       this.pageId,
       this.browserIsRemote,
+      this.humanBehavior,
+      this.pointerState,
     );
 
     this.networkManager = new NetworkManager();
@@ -280,6 +296,36 @@ export class Page {
     }
   }
 
+  private resolveHumanBehavior(override?: HumanBehaviorInput) {
+    const behavior = normalizeHumanBehavior(this.humanBehavior, override);
+    return { behavior, random: randomForBehavior(behavior) };
+  }
+
+  private async movePointer(
+    x: number,
+    y: number,
+    options?: {
+      humanBehavior?: HumanBehaviorInput;
+      button?: "left" | "right" | "middle" | "none";
+      buttons?: number;
+    },
+  ): Promise<ReturnType<Page["resolveHumanBehavior"]>> {
+    const resolved = this.resolveHumanBehavior(options?.humanBehavior);
+    await maybeHumanDelay(resolved.behavior, resolved.random);
+    await dispatchHumanMouseMove({
+      session: this.mainSession,
+      behavior: resolved.behavior,
+      random: resolved.random,
+      from: this.pointerState.get(this.mainSession),
+      to: { x, y },
+      button: options?.button,
+      buttons: options?.buttons,
+      updateCursor: (cx, cy) => this.updateCursor(cx, cy),
+    });
+    this.pointerState.set(this.mainSession, { x, y });
+    return resolved;
+  }
+
   public async addInitScript<Arg>(
     script: InitScriptSource<Arg>,
     arg?: Arg,
@@ -303,6 +349,7 @@ export class Page {
     apiClient?: StagehandAPIClient | null,
     localBrowserLaunchOptions?: LocalBrowserLaunchOptions | null,
     browserIsRemote = false,
+    humanBehavior?: HumanBehaviorInput,
   ): Promise<Page> {
     // Context already issues Page.enable + lifecycle enable before resume.
     // Re-issue here only as best-effort and do not block page registration on
@@ -324,6 +371,7 @@ export class Page {
       mainFrameId,
       apiClient,
       browserIsRemote,
+      humanBehavior,
     );
     // Seed current URL from initial frame tree
     try {
@@ -396,6 +444,8 @@ export class Page {
         newRoot,
         this.pageId,
         this.browserIsRemote,
+        this.humanBehavior,
+        this.pointerState,
       );
     }
 
@@ -539,7 +589,14 @@ export class Page {
     if (hit) return hit;
 
     const sess = this.getSessionForFrame(frameId);
-    const f = new Frame(sess, frameId, this.pageId, this.browserIsRemote);
+    const f = new Frame(
+      sess,
+      frameId,
+      this.pageId,
+      this.browserIsRemote,
+      this.humanBehavior,
+      this.pointerState,
+    );
     this.frameCache.set(frameId, f);
     return f;
   }
@@ -1428,6 +1485,7 @@ export class Page {
       button?: "left" | "right" | "middle";
       clickCount?: number;
       returnXpath?: boolean;
+      humanBehavior?: HumanBehaviorInput;
     },
   ): Promise<string> {
     const button = options?.button ?? "left";
@@ -1468,41 +1526,60 @@ export class Page {
       }
     }
 
-    // Synthesize a simple mouse move + press + release sequence.
-    await this.updateCursor(x, y);
-    // Dispatch click events in a pipelined burst to reduce inter-click delay
-    // from network/CPU jitter between round trips.
-    const dispatches: Array<Promise<unknown>> = [];
-    dispatches.push(
-      this.mainSession.send<never>("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
+    const { behavior, random } = this.resolveHumanBehavior(
+      options?.humanBehavior,
+    );
+    if (behavior.enabled && behavior.mouse.enabled) {
+      await this.movePointer(x, y, {
+        humanBehavior: options?.humanBehavior,
+        button: "none",
+      });
+      await sleep(resolveDelay(behavior.mouse.settleDelayMs, random));
+      await dispatchHumanClick({
+        session: this.mainSession,
+        behavior,
+        random,
         x,
         y,
-        button: "none",
-      } as Protocol.Input.DispatchMouseEventRequest),
-    );
-
-    for (let i = 1; i <= clickCount; i++) {
+        button,
+        clickCount,
+      });
+    } else {
+      await this.updateCursor(x, y);
+      // Dispatch click events in a pipelined burst to reduce inter-click delay
+      // from network/CPU jitter between round trips.
+      const dispatches: Array<Promise<unknown>> = [];
       dispatches.push(
         this.mainSession.send<never>("Input.dispatchMouseEvent", {
-          type: "mousePressed",
+          type: "mouseMoved",
           x,
           y,
-          button,
-          clickCount: i,
+          button: "none",
         } as Protocol.Input.DispatchMouseEventRequest),
       );
-      dispatches.push(
-        this.mainSession.send<never>("Input.dispatchMouseEvent", {
-          type: "mouseReleased",
-          x,
-          y,
-          button,
-          clickCount: i,
-        } as Protocol.Input.DispatchMouseEventRequest),
-      );
+      for (let i = 1; i <= clickCount; i++) {
+        dispatches.push(
+          this.mainSession.send<never>("Input.dispatchMouseEvent", {
+            type: "mousePressed",
+            x,
+            y,
+            button,
+            clickCount: i,
+          } as Protocol.Input.DispatchMouseEventRequest),
+        );
+        dispatches.push(
+          this.mainSession.send<never>("Input.dispatchMouseEvent", {
+            type: "mouseReleased",
+            x,
+            y,
+            button,
+            clickCount: i,
+          } as Protocol.Input.DispatchMouseEventRequest),
+        );
+      }
+      await Promise.all(dispatches);
+      this.pointerState.set(this.mainSession, { x, y });
     }
-    await Promise.all(dispatches);
 
     return xpathResult ?? "";
   }
@@ -1516,7 +1593,7 @@ export class Page {
   async hover(
     x: number,
     y: number,
-    options?: { returnXpath?: boolean },
+    options?: { returnXpath?: boolean; humanBehavior?: HumanBehaviorInput },
   ): Promise<string> {
     let xpathResult: string | undefined;
     if (options?.returnXpath) {
@@ -1552,13 +1629,10 @@ export class Page {
       }
     }
 
-    await this.updateCursor(x, y);
-    await this.mainSession.send<never>("Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x,
-      y,
+    await this.movePointer(x, y, {
+      humanBehavior: options?.humanBehavior,
       button: "none",
-    } as Protocol.Input.DispatchMouseEventRequest);
+    });
 
     return xpathResult ?? "";
   }
@@ -1569,7 +1643,7 @@ export class Page {
     y: number,
     deltaX: number,
     deltaY: number,
-    options?: { returnXpath?: boolean },
+    options?: { returnXpath?: boolean; humanBehavior?: HumanBehaviorInput },
   ): Promise<string> {
     let xpathResult: string | undefined;
     if (options?.returnXpath) {
@@ -1581,23 +1655,20 @@ export class Page {
       }
     }
 
-    await this.updateCursor(x, y);
-    await this.mainSession.send<never>("Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x,
-      y,
+    const { behavior, random } = await this.movePointer(x, y, {
+      humanBehavior: options?.humanBehavior,
       button: "none",
-    } as Protocol.Input.DispatchMouseEventRequest);
+    });
 
-    // Synthesize a simple mouse move + press + release sequence
-    await this.mainSession.send<never>("Input.dispatchMouseEvent", {
-      type: "mouseWheel",
+    await dispatchHumanScroll({
+      session: this.mainSession,
+      behavior,
+      random,
       x,
       y,
-      button: "none",
       deltaX,
       deltaY,
-    } as Protocol.Input.DispatchMouseEventRequest);
+    });
 
     return xpathResult ?? "";
   }
@@ -1619,6 +1690,7 @@ export class Page {
       steps?: number;
       delay?: number;
       returnXpath?: boolean;
+      humanBehavior?: HumanBehaviorInput;
     },
   ): Promise<[string, string]> {
     const button = options?.button ?? "left";
@@ -1658,14 +1730,12 @@ export class Page {
       }
     }
 
-    // Move to start
-    await this.updateCursor(fromX, fromY);
-    await this.mainSession.send<never>("Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x: fromX,
-      y: fromY,
+    const resolved = await this.movePointer(fromX, fromY, {
+      humanBehavior: options?.humanBehavior,
       button: "none",
-    } as Protocol.Input.DispatchMouseEventRequest);
+    });
+    const behavior = resolved.behavior;
+    const random = resolved.random;
 
     // Press
     await this.mainSession.send<never>("Input.dispatchMouseEvent", {
@@ -1676,21 +1746,37 @@ export class Page {
       buttons: buttonMask(button),
       clickCount: 1,
     } as Protocol.Input.DispatchMouseEventRequest);
+    if (behavior.enabled && behavior.mouse.enabled) {
+      await sleep(resolveDelay(behavior.mouse.pressDelayMs, random));
+    }
 
-    // Intermediate moves
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const x = fromX + (toX - fromX) * t;
-      const y = fromY + (toY - fromY) * t;
-      await this.updateCursor(x, y);
-      await this.mainSession.send<never>("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x,
-        y,
+    if (behavior.enabled && behavior.mouse.enabled && options?.steps == null) {
+      await dispatchHumanMouseMove({
+        session: this.mainSession,
+        behavior,
+        random,
+        from: { x: fromX, y: fromY },
+        to: { x: toX, y: toY },
         button,
         buttons: buttonMask(button),
-      } as Protocol.Input.DispatchMouseEventRequest);
-      if (delay) await sleep(delay);
+        updateCursor: (cx, cy) => this.updateCursor(cx, cy),
+      });
+    } else {
+      // Intermediate moves
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const x = fromX + (toX - fromX) * t;
+        const y = fromY + (toY - fromY) * t;
+        await this.updateCursor(x, y);
+        await this.mainSession.send<never>("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x,
+          y,
+          button,
+          buttons: buttonMask(button),
+        } as Protocol.Input.DispatchMouseEventRequest);
+        if (delay) await sleep(delay);
+      }
     }
 
     // Release at end
@@ -1703,6 +1789,7 @@ export class Page {
       buttons: buttonMask(button),
       clickCount: 1,
     } as Protocol.Input.DispatchMouseEventRequest);
+    this.pointerState.set(this.mainSession, { x: toX, y: toY });
 
     return [fromXpath ?? "", toXpath ?? ""];
   }
@@ -1716,13 +1803,25 @@ export class Page {
   @FlowLogger.wrapWithLogging({ eventType: "PageType" })
   async type(
     text: string,
-    options?: { delay?: number; withMistakes?: boolean },
+    options?: {
+      delay?: number;
+      withMistakes?: boolean;
+      humanBehavior?: HumanBehaviorInput;
+    },
   ): Promise<void> {
+    const { behavior, random } = this.resolveHumanBehavior(
+      options?.humanBehavior,
+    );
+    await maybeHumanDelay(behavior, random);
+    const useHumanTyping =
+      behavior.enabled && behavior.typing.enabled && options?.delay == null;
     const delay = Math.max(0, options?.delay ?? 0);
-    const withMistakes = !!options?.withMistakes;
-
-    const sleep = (ms: number) =>
-      new Promise<void>((r) => (ms > 0 ? setTimeout(r, ms) : r()));
+    const mistakeChance =
+      options?.withMistakes === true
+        ? 0.12
+        : useHumanTyping
+          ? behavior.typing.mistakeChance
+          : 0;
 
     const keyStroke = async (
       ch: string,
@@ -1800,7 +1899,7 @@ export class Page {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:'\"!?@#$%^&*()-_=+[]{}<>/\\|`~";
       let c = avoid;
       while (c === avoid) {
-        c = pool[Math.floor(Math.random() * pool.length)];
+        c = pool[Math.floor(random() * pool.length)];
       }
       return c;
     };
@@ -1820,18 +1919,27 @@ export class Page {
           windowsVirtualKeyCode: 9,
         });
       } else {
-        if (withMistakes && Math.random() < 0.12) {
+        if (mistakeChance > 0 && random() < mistakeChance) {
           // Type a wrong character, then backspace to correct
           const wrong = randomPrintable(ch);
           await keyStroke(wrong);
-          if (delay) await sleep(delay);
+          if (useHumanTyping) {
+            await sleep(resolveDelay(behavior.typing.mistakeDelayMs, random));
+          } else if (delay) await sleep(delay);
           await pressBackspace();
-          if (delay) await sleep(delay);
+          if (useHumanTyping) {
+            await sleep(resolveDelay(behavior.typing.mistakeDelayMs, random));
+          } else if (delay) await sleep(delay);
         }
         await keyStroke(ch);
       }
 
-      if (delay) await sleep(delay);
+      if (useHumanTyping) {
+        await sleep(resolveDelay(behavior.typing.delayMs, random));
+        if (ch === " ") {
+          await sleep(resolveDelay(behavior.typing.wordPauseMs, random));
+        }
+      } else if (delay) await sleep(delay);
     }
   }
 
@@ -1841,10 +1949,15 @@ export class Page {
    * Supports key combinations with modifiers like "Cmd+A", "Ctrl+C", "Shift+Tab", etc.
    */
   @FlowLogger.wrapWithLogging({ eventType: "PageKeyPress" })
-  async keyPress(key: string, options?: { delay?: number }): Promise<void> {
+  async keyPress(
+    key: string,
+    options?: { delay?: number; humanBehavior?: HumanBehaviorInput },
+  ): Promise<void> {
+    const { behavior, random } = this.resolveHumanBehavior(
+      options?.humanBehavior,
+    );
+    await maybeHumanDelay(behavior, random);
     const delay = Math.max(0, options?.delay ?? 0);
-    const sleep = (ms: number) =>
-      new Promise<void>((r) => (ms > 0 ? setTimeout(r, ms) : r()));
 
     // Split key combination by + but handle the special case of "+" key itself
     function split(keyString: string): string[] {
@@ -1880,6 +1993,9 @@ export class Page {
 
       await this.keyDown(mainKey);
       if (delay) await sleep(delay);
+      else if (behavior.enabled && behavior.typing.enabled) {
+        await sleep(resolveDelay(behavior.typing.delayMs, random));
+      }
       await this.keyUp(mainKey);
 
       for (let i = modifierKeys.length - 1; i >= 0; i--) {

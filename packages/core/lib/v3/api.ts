@@ -218,6 +218,7 @@ export class StagehandAPIClient {
     verbose,
     systemPrompt,
     selfHeal,
+    humanBehavior,
     browserbaseSessionCreateParams,
     browserbaseSessionID,
     // browser,  TODO for local browsers
@@ -247,6 +248,7 @@ export class StagehandAPIClient {
       verbose,
       systemPrompt,
       selfHeal,
+      humanBehavior,
       browserbaseSessionCreateParams,
       browserbaseSessionID,
       // browser, TODO: only send when connected to local fastify

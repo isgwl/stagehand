@@ -22,6 +22,16 @@ import {
 import { normalizeInputFiles } from "./fileUploadUtils.js";
 import { SetInputFilesArgument, MouseButton } from "../types/public/locator.js";
 import { NormalizedFilePayload } from "../types/private/locator.js";
+import type { HumanBehaviorInput } from "../types/public/page.js";
+import {
+  dispatchHumanClick,
+  dispatchHumanMouseMove,
+  maybeHumanDelay,
+  normalizeHumanBehavior,
+  randomForBehavior,
+  resolveDelay,
+  sleep,
+} from "./humanBehavior.js";
 
 const MAX_REMOTE_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB guard copied from Playwright
 
@@ -346,7 +356,7 @@ export class Locator {
    * Move the mouse cursor to the element's visual center without clicking.
    * - Scrolls into view best-effort, resolves geometry, then dispatches a mouse move.
    */
-  async hover(): Promise<void> {
+  async hover(options?: { humanBehavior?: HumanBehaviorInput }): Promise<void> {
     const session = this.frame.session;
     const { objectId } = await this.resolveNode();
     try {
@@ -361,12 +371,22 @@ export class Locator {
       if (!box.model) throw new ElementNotVisibleError(this.selector);
       const { cx, cy } = this.centerFromBoxContent(box.model.content);
 
-      await session.send<never>("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x: cx,
-        y: cy,
+      const behavior = normalizeHumanBehavior(
+        this.frame.getHumanBehavior(),
+        options?.humanBehavior,
+      );
+      const random = randomForBehavior(behavior);
+      const pointerState = this.frame.getPointerState();
+      await maybeHumanDelay(behavior, random);
+      await dispatchHumanMouseMove({
+        session,
+        behavior,
+        random,
+        from: pointerState?.get(session),
+        to: { x: cx, y: cy },
         button: "none",
-      } as Protocol.Input.DispatchMouseEventRequest);
+      });
+      pointerState?.set(session, { x: cx, y: cy });
     } finally {
       await session
         .send<never>("Runtime.releaseObject", { objectId })
@@ -385,6 +405,7 @@ export class Locator {
   async click(options?: {
     button?: MouseButton;
     clickCount?: number;
+    humanBehavior?: HumanBehaviorInput;
   }): Promise<void> {
     const session = this.frame.session;
     const { objectId } = await this.resolveNode();
@@ -403,40 +424,69 @@ export class Locator {
       );
       if (!box.model) throw new ElementNotVisibleError(this.selector);
       const { cx, cy } = this.centerFromBoxContent(box.model.content);
+      const behavior = normalizeHumanBehavior(
+        this.frame.getHumanBehavior(),
+        options?.humanBehavior,
+      );
+      const random = randomForBehavior(behavior);
+      const pointerState = this.frame.getPointerState();
+      await maybeHumanDelay(behavior, random);
 
-      // Dispatch click events in a pipelined burst to reduce inter-click delay
-      // from network/CPU jitter between round trips.
-      const dispatches: Array<Promise<unknown>> = [];
-      dispatches.push(
-        session.send<never>("Input.dispatchMouseEvent", {
-          type: "mouseMoved",
+      if (behavior.enabled && behavior.mouse.enabled) {
+        await dispatchHumanMouseMove({
+          session,
+          behavior,
+          random,
+          from: pointerState?.get(session),
+          to: { x: cx, y: cy },
+          button: "none",
+        });
+        pointerState?.set(session, { x: cx, y: cy });
+        await sleep(resolveDelay(behavior.mouse.settleDelayMs, random));
+        await dispatchHumanClick({
+          session,
+          behavior,
+          random,
           x: cx,
           y: cy,
-          button: "none",
-        } as Protocol.Input.DispatchMouseEventRequest),
-      );
-
-      for (let i = 1; i <= clickCount; i++) {
+          button,
+          clickCount,
+        });
+      } else {
+        // Dispatch click events in a pipelined burst to reduce inter-click delay
+        // from network/CPU jitter between round trips.
+        const dispatches: Array<Promise<unknown>> = [];
         dispatches.push(
           session.send<never>("Input.dispatchMouseEvent", {
-            type: "mousePressed",
+            type: "mouseMoved",
             x: cx,
             y: cy,
-            button,
-            clickCount: i,
+            button: "none",
           } as Protocol.Input.DispatchMouseEventRequest),
         );
-        dispatches.push(
-          session.send<never>("Input.dispatchMouseEvent", {
-            type: "mouseReleased",
-            x: cx,
-            y: cy,
-            button,
-            clickCount: i,
-          } as Protocol.Input.DispatchMouseEventRequest),
-        );
+        for (let i = 1; i <= clickCount; i++) {
+          dispatches.push(
+            session.send<never>("Input.dispatchMouseEvent", {
+              type: "mousePressed",
+              x: cx,
+              y: cy,
+              button,
+              clickCount: i,
+            } as Protocol.Input.DispatchMouseEventRequest),
+          );
+          dispatches.push(
+            session.send<never>("Input.dispatchMouseEvent", {
+              type: "mouseReleased",
+              x: cx,
+              y: cy,
+              button,
+              clickCount: i,
+            } as Protocol.Input.DispatchMouseEventRequest),
+          );
+        }
+        await Promise.all(dispatches);
+        pointerState?.set(session, { x: cx, y: cy });
       }
-      await Promise.all(dispatches);
     } finally {
       // release the element handle
       try {
@@ -649,7 +699,10 @@ export class Locator {
    * - If no delay, uses `Input.insertText` for efficiency.
    * - With delay, synthesizes `keyDown`/`keyUp` per character.
    */
-  async type(text: string, options?: { delay?: number }): Promise<void> {
+  async type(
+    text: string,
+    options?: { delay?: number; humanBehavior?: HumanBehaviorInput },
+  ): Promise<void> {
     const session = this.frame.session;
     const { objectId } = await this.resolveNode();
 
@@ -664,7 +717,16 @@ export class Locator {
         },
       );
 
-      if (!options?.delay) {
+      const behavior = normalizeHumanBehavior(
+        this.frame.getHumanBehavior(),
+        options?.humanBehavior,
+      );
+      const random = randomForBehavior(behavior);
+      const useHumanTyping =
+        behavior.enabled && behavior.typing.enabled && options?.delay == null;
+      await maybeHumanDelay(behavior, random);
+
+      if (!options?.delay && !useHumanTyping) {
         await session.send<never>("Input.insertText", { text });
         return;
       }
@@ -682,7 +744,14 @@ export class Locator {
           key: ch,
         } as Protocol.Input.DispatchKeyEventRequest);
 
-        await new Promise((r) => setTimeout(r, options.delay));
+        if (useHumanTyping) {
+          await sleep(resolveDelay(behavior.typing.delayMs, random));
+          if (ch === " ") {
+            await sleep(resolveDelay(behavior.typing.wordPauseMs, random));
+          }
+        } else {
+          await new Promise((r) => setTimeout(r, options.delay));
+        }
       }
     } finally {
       await session.send<never>("Runtime.releaseObject", { objectId });
