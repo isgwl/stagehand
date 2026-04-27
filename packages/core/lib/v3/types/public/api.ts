@@ -347,6 +347,23 @@ export const SessionStartRequestSchema = z
       description: "Enable self-healing for failed actions",
       example: true,
     }),
+    humanBehavior: z
+      .union([
+        z.boolean(),
+        z.object({
+          preset: z.enum(["fast", "balanced", "careful"]).optional(),
+          seed: z.number().optional(),
+          mouse: z.record(z.string(), z.unknown()).optional(),
+          typing: z.record(z.string(), z.unknown()).optional(),
+          scroll: z.record(z.string(), z.unknown()).optional(),
+          actionDelayMs: z.unknown().optional(),
+        }),
+      ])
+      .optional()
+      .meta({
+        description:
+          "Opt-in human-like interaction behavior for browser actions",
+      }),
     browserbaseSessionID: z.string().optional().meta({
       description: "Existing Browserbase session ID to resume",
     }),

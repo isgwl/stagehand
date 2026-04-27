@@ -2,6 +2,7 @@ import { z } from "zod";
 import { LLMClient } from "../../llm/LLMClient.js";
 import { ModelConfiguration } from "./model.js";
 import { LogLine } from "./logs.js";
+import type { HumanBehaviorInput } from "./page.js";
 import {
   type BrowserbaseSessionCreateParams,
   LocalBrowserLaunchOptionsSchema,
@@ -60,6 +61,11 @@ export interface V3Options {
   /** Directory used to persist cached actions for act(). */
   cacheDir?: string;
   domSettleTimeout?: number;
+  /**
+   * Opt-in human-like interaction behavior for mouse movement, typing, and
+   * scrolling. Existing fast CDP dispatch remains the default when omitted.
+   */
+  humanBehavior?: HumanBehaviorInput;
   disableAPI?: boolean;
   /**
    * When true, enables server-side caching for API requests.

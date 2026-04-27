@@ -480,6 +480,36 @@ components:
           description: Enable self-healing for failed actions
           example: true
           type: boolean
+        humanBehavior:
+          description: Opt-in human-like interaction behavior for browser actions
+          anyOf:
+            - type: boolean
+            - type: object
+              properties:
+                preset:
+                  type: string
+                  enum:
+                    - fast
+                    - balanced
+                    - careful
+                seed:
+                  type: number
+                mouse:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                typing:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                scroll:
+                  type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                actionDelayMs: {}
         browserbaseSessionID:
           description: Existing Browserbase session ID to resume
           type: string

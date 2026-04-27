@@ -900,6 +900,7 @@ export class V3 {
             this.ctx = await V3Context.create(lbo.cdpUrl, {
               env: "LOCAL",
               cdpHeaders: lbo.cdpHeaders,
+              humanBehavior: this.opts.humanBehavior,
             });
             this.ctx.conn.flowLoggerContext = this.flowLoggerContext;
             this.ctx.conn.onTransportClosed(this._onCdpClosed);
@@ -1000,6 +1001,7 @@ export class V3 {
           this.ctx = await V3Context.create(ws, {
             env: "LOCAL",
             localBrowserLaunchOptions: lbo,
+            humanBehavior: this.opts.humanBehavior,
           });
           this.ctx.conn.flowLoggerContext = this.flowLoggerContext;
           this.ctx.conn.onTransportClosed(this._onCdpClosed);
@@ -1082,6 +1084,7 @@ export class V3 {
               verbose: this.verbose,
               systemPrompt: this.opts.systemPrompt,
               selfHeal: this.opts.selfHeal,
+              humanBehavior: this.opts.humanBehavior,
               browserbaseSessionCreateParams: createSessionPayload,
               browserbaseSessionID: this.opts.browserbaseSessionID,
             });
@@ -1099,6 +1102,7 @@ export class V3 {
           this.ctx = await V3Context.create(ws, {
             env: "BROWSERBASE",
             apiClient: this.apiClient,
+            humanBehavior: this.opts.humanBehavior,
           });
           this.ctx.conn.flowLoggerContext = this.flowLoggerContext;
           this.ctx.conn.onTransportClosed(this._onCdpClosed);

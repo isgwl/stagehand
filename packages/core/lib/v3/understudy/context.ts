@@ -8,6 +8,7 @@ import { v3ScriptContent } from "../dom/build/scriptV3Content.js";
 import { executionContexts } from "./executionContextRegistry.js";
 import type { StagehandAPIClient } from "../api.js";
 import { LocalBrowserLaunchOptions } from "../types/public/index.js";
+import type { HumanBehaviorInput } from "../types/public/page.js";
 import { InitScriptSource } from "../types/private/index.js";
 import { normalizeInitScriptSource } from "./initScripts.js";
 import {
@@ -105,6 +106,7 @@ export class V3Context {
     private readonly env: "LOCAL" | "BROWSERBASE" = "LOCAL",
     private readonly apiClient: StagehandAPIClient | null = null,
     private readonly localBrowserLaunchOptions: LocalBrowserLaunchOptions | null = null,
+    private readonly humanBehavior?: HumanBehaviorInput,
   ) {}
 
   private readonly _piercerInstalled = new Set<string>();
@@ -160,6 +162,7 @@ export class V3Context {
       env?: "LOCAL" | "BROWSERBASE";
       apiClient?: StagehandAPIClient | null;
       localBrowserLaunchOptions?: LocalBrowserLaunchOptions | null;
+      humanBehavior?: HumanBehaviorInput;
       cdpHeaders?: Record<string, string>;
     },
   ): Promise<V3Context> {
@@ -172,6 +175,7 @@ export class V3Context {
         opts?.env ?? "LOCAL",
         opts?.apiClient ?? null,
         opts?.localBrowserLaunchOptions ?? null,
+        opts?.humanBehavior,
       );
       await ctx.bootstrap();
       // Allow connectTimeoutMs to also govern how long we wait for the first
@@ -788,6 +792,7 @@ export class V3Context {
             this.apiClient,
             this.localBrowserLaunchOptions,
             this.env === "BROWSERBASE",
+            this.humanBehavior,
           );
         } catch (error) {
           createError = error;

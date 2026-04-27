@@ -219,7 +219,7 @@ async function scrollByPixelOffset(
 }
 
 async function wheelScroll(ctx: UnderstudyMethodHandlerContext): Promise<void> {
-  const { frame, args } = ctx;
+  const { page, args } = ctx;
   const deltaY = Number(args[0] ?? 200);
   v3Logger({
     category: "action",
@@ -227,13 +227,7 @@ async function wheelScroll(ctx: UnderstudyMethodHandlerContext): Promise<void> {
     level: 2,
     auxiliary: { deltaY: { value: String(deltaY), type: "string" } },
   });
-  await frame.session.send<never>("Input.dispatchMouseEvent", {
-    type: "mouseWheel",
-    x: 0,
-    y: 0,
-    deltaY,
-    deltaX: 0,
-  } as Protocol.Input.DispatchMouseEventRequest);
+  await page.scroll(0, 0, 0, deltaY);
 }
 
 async function fillOrType(ctx: UnderstudyMethodHandlerContext): Promise<void> {

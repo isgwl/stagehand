@@ -39,6 +39,67 @@ export const MouseButtonSchema = z
   .enum(["left", "right", "middle"])
   .meta({ id: "MouseButton" });
 
+export const HumanBehaviorPresetSchema = z
+  .enum(["fast", "balanced", "careful"])
+  .meta({ id: "HumanBehaviorPreset" });
+
+export const HumanDelayRangeSchema = z
+  .object({
+    min: z.number().min(0),
+    max: z.number().min(0),
+  })
+  .strict()
+  .meta({ id: "HumanDelayRange" });
+
+export const HumanDelaySchema = z
+  .union([z.number().min(0), HumanDelayRangeSchema])
+  .meta({ id: "HumanDelay" });
+
+export const HumanBehaviorOptionsSchema = z
+  .object({
+    preset: HumanBehaviorPresetSchema.optional(),
+    seed: z.number().int().optional(),
+    mouse: z
+      .object({
+        enabled: z.boolean().optional(),
+        durationMs: HumanDelaySchema.optional(),
+        steps: z.number().int().positive().optional(),
+        jitter: z.number().min(0).optional(),
+        overshoot: z.boolean().optional(),
+        settleDelayMs: HumanDelaySchema.optional(),
+        pressDelayMs: HumanDelaySchema.optional(),
+        clickDelayMs: HumanDelaySchema.optional(),
+      })
+      .strict()
+      .optional(),
+    typing: z
+      .object({
+        enabled: z.boolean().optional(),
+        delayMs: HumanDelaySchema.optional(),
+        wordPauseMs: HumanDelaySchema.optional(),
+        mistakeChance: z.number().min(0).max(1).optional(),
+        mistakeDelayMs: HumanDelaySchema.optional(),
+      })
+      .strict()
+      .optional(),
+    scroll: z
+      .object({
+        enabled: z.boolean().optional(),
+        chunkSize: HumanDelaySchema.optional(),
+        delayMs: HumanDelaySchema.optional(),
+        jitter: z.number().min(0).optional(),
+      })
+      .strict()
+      .optional(),
+    actionDelayMs: HumanDelaySchema.optional(),
+  })
+  .strict()
+  .meta({ id: "HumanBehaviorOptions" });
+
+export const HumanBehaviorInputSchema = z
+  .union([z.boolean(), HumanBehaviorOptionsSchema])
+  .meta({ id: "HumanBehaviorInput" });
+
 export const LoadStateSchema = z
   .enum(["load", "domcontentloaded", "networkidle"])
   .meta({ id: "LoadState" });
@@ -277,6 +338,7 @@ export const PageClickParamsSchema = PageWithPageIdSchema.extend({
   clickCount: z.number().int().lte(3).gte(1).optional(),
   returnSelector: z.boolean().default(false).optional(),
   method: z.enum(["jsevent", "xy"]).default("xy"),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
   // TODO: add expectDownload, expectNavigation, expectPopup  OR expect: z.enum(...)
 })
   .strict()
@@ -285,6 +347,7 @@ export const PageClickParamsSchema = PageWithPageIdSchema.extend({
 export const PageHoverParamsSchema = PageWithPageIdSchema.extend({
   selector: SelectorSchema,
   returnSelector: z.boolean().default(false).optional(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageHoverParams" });
@@ -297,6 +360,7 @@ export const PageScrollByOffsetParamsSchema = PageWithPageIdSchema.extend({
       y: z.number(),
     })
     .strict(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageScrollByOffsetParams" });
@@ -305,6 +369,7 @@ export const PageScrollByPagesParamsSchema = PageWithPageIdSchema.extend({
   cursorPosition: SelectorSchema.optional(),
   pages: z.number().lte(100).gte(-100).default(1),
   delayBetweenMs: z.number().int().min(0).optional(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageScrollByPagesParams" });
@@ -312,6 +377,7 @@ export const PageScrollByPagesParamsSchema = PageWithPageIdSchema.extend({
 export const PageScrollToTargetParamsSchema = PageWithPageIdSchema.extend({
   target: SelectorSchema,
   position: z.enum(["center", "top", "bottom"]).default("center"),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageScrollToTargetParams" });
@@ -331,6 +397,7 @@ export const PageDragAndDropParamsSchema = PageWithPageIdSchema.extend({
   steps: z.number().int().positive().optional(),
   delay: z.number().int().min(0).optional(),
   returnSelector: z.boolean().default(false).optional(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageDragAndDropParams" });
@@ -339,6 +406,7 @@ export const PageTypeParamsSchema = PageWithPageIdSchema.extend({
   text: z.string(),
   delay: z.number().int().min(0).optional(),
   withMistakes: z.boolean().optional(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageTypeParams" });
@@ -346,6 +414,7 @@ export const PageTypeParamsSchema = PageWithPageIdSchema.extend({
 export const PageKeyPressParamsSchema = PageWithPageIdSchema.extend({
   key: z.string().min(1),
   delay: z.number().int().min(0).optional(),
+  humanBehavior: HumanBehaviorInputSchema.optional(),
 })
   .strict()
   .meta({ id: "PageKeyPressParams" });

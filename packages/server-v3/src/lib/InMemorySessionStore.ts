@@ -206,7 +206,9 @@ export class InMemorySessionStore implements SessionStore {
   ): V3Options {
     const isBrowserbase = params.browserType === "browserbase";
 
-    const options: V3Options = {
+    const options: Omit<V3Options, "humanBehavior"> & {
+      humanBehavior?: unknown;
+    } = {
       env: isBrowserbase ? "BROWSERBASE" : "LOCAL",
       model: {
         modelName: params.modelName,
@@ -217,6 +219,7 @@ export class InMemorySessionStore implements SessionStore {
       selfHeal: params.selfHeal,
       domSettleTimeout: params.domSettleTimeoutMs,
       experimental: params.experimental,
+      humanBehavior: params.humanBehavior,
       // Wrap logger to use the ref so it can be updated per-request
       logger: (message: LogLine) => {
         if (loggerRef.current) {
@@ -241,7 +244,7 @@ export class InMemorySessionStore implements SessionStore {
       options.localBrowserLaunchOptions = params.localBrowserLaunchOptions;
     }
 
-    return options;
+    return options as V3Options;
   }
 
   async createSession(

@@ -33,6 +33,8 @@ export interface CreateSessionParams {
   domSettleTimeoutMs?: number;
   /** Enable experimental features */
   experimental?: boolean;
+  /** Opt-in human-like interaction behavior */
+  humanBehavior?: unknown;
 
   // Browserbase-specific (used by cloud implementations)
   /** Browserbase API key */

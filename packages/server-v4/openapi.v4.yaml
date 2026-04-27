@@ -313,6 +313,98 @@ components:
         - us-east-1
         - eu-central-1
         - ap-southeast-1
+    HumanBehaviorInput:
+      anyOf:
+        - type: boolean
+        - $ref: "#/components/schemas/HumanBehaviorOptions"
+    HumanBehaviorOptions:
+      type: object
+      properties:
+        preset:
+          $ref: "#/components/schemas/HumanBehaviorPreset"
+        seed:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        mouse:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            durationMs:
+              $ref: "#/components/schemas/HumanDelay"
+            steps:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            jitter:
+              type: number
+              minimum: 0
+            overshoot:
+              type: boolean
+            settleDelayMs:
+              $ref: "#/components/schemas/HumanDelay"
+            pressDelayMs:
+              $ref: "#/components/schemas/HumanDelay"
+            clickDelayMs:
+              $ref: "#/components/schemas/HumanDelay"
+          additionalProperties: false
+        typing:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            delayMs:
+              $ref: "#/components/schemas/HumanDelay"
+            wordPauseMs:
+              $ref: "#/components/schemas/HumanDelay"
+            mistakeChance:
+              type: number
+              minimum: 0
+              maximum: 1
+            mistakeDelayMs:
+              $ref: "#/components/schemas/HumanDelay"
+          additionalProperties: false
+        scroll:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            chunkSize:
+              $ref: "#/components/schemas/HumanDelay"
+            delayMs:
+              $ref: "#/components/schemas/HumanDelay"
+            jitter:
+              type: number
+              minimum: 0
+          additionalProperties: false
+        actionDelayMs:
+          $ref: "#/components/schemas/HumanDelay"
+      additionalProperties: false
+    HumanBehaviorPreset:
+      type: string
+      enum:
+        - fast
+        - balanced
+        - careful
+    HumanDelay:
+      anyOf:
+        - type: number
+          minimum: 0
+        - $ref: "#/components/schemas/HumanDelayRange"
+    HumanDelayRange:
+      type: object
+      properties:
+        min:
+          type: number
+          minimum: 0
+        max:
+          type: number
+          minimum: 0
+      required:
+        - min
+        - max
+      additionalProperties: false
     SessionHeaders:
       type: object
       properties:
@@ -2715,6 +2807,8 @@ components:
           enum:
             - jsevent
             - xy
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - selector
       additionalProperties: false
@@ -2728,6 +2822,8 @@ components:
         returnSelector:
           default: false
           type: boolean
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - selector
       additionalProperties: false
@@ -2749,6 +2845,8 @@ components:
           required:
             - y
           additionalProperties: false
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - offset
       additionalProperties: false
@@ -2768,6 +2866,8 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       additionalProperties: false
     PageScrollToTargetParams:
       type: object
@@ -2783,6 +2883,8 @@ components:
             - center
             - top
             - bottom
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - target
       additionalProperties: false
@@ -2813,6 +2915,8 @@ components:
         returnSelector:
           default: false
           type: boolean
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - from
         - to
@@ -2830,6 +2934,8 @@ components:
           maximum: 9007199254740991
         withMistakes:
           type: boolean
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - text
       additionalProperties: false
@@ -2845,6 +2951,8 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - key
       additionalProperties: false
@@ -6585,6 +6693,8 @@ components:
           enum:
             - jsevent
             - xy
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - selector
         - method
@@ -6608,6 +6718,8 @@ components:
             - x
             - y
           additionalProperties: false
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - offset
       additionalProperties: false
@@ -6627,6 +6739,8 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - pages
       additionalProperties: false
@@ -6644,6 +6758,8 @@ components:
             - center
             - top
             - bottom
+        humanBehavior:
+          $ref: "#/components/schemas/HumanBehaviorInput"
       required:
         - target
         - position
