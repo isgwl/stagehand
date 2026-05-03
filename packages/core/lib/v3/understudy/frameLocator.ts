@@ -7,6 +7,7 @@ import {
   ContentFrameNotFoundError,
   StagehandInvalidArgumentError,
 } from "../types/public/sdkErrors.js";
+import type { HumanBehaviorInput } from "../types/public/page.js";
 
 /**
  * FrameLocator: resolves iframe elements to their child Frames and allows
@@ -109,16 +110,20 @@ class LocatorDelegate {
   async click(options?: {
     button?: "left" | "right" | "middle";
     clickCount?: number;
+    humanBehavior?: HumanBehaviorInput;
   }) {
     return (await this.real()).click(options);
   }
-  async hover() {
-    return (await this.real()).hover();
+  async hover(options?: { humanBehavior?: HumanBehaviorInput }) {
+    return (await this.real()).hover(options);
   }
   async fill(value: string) {
     return (await this.real()).fill(value);
   }
-  async type(text: string, options?: { delay?: number }) {
+  async type(
+    text: string,
+    options?: { delay?: number; humanBehavior?: HumanBehaviorInput },
+  ) {
     return (await this.real()).type(text, options);
   }
   async selectOption(values: string | string[]) {
@@ -126,6 +131,9 @@ class LocatorDelegate {
   }
   async scrollTo(percent: number | string) {
     return (await this.real()).scrollTo(percent);
+  }
+  async scrollIntoView(options?: { humanBehavior?: HumanBehaviorInput }) {
+    return (await this.real()).scrollIntoView(options);
   }
   async isVisible() {
     return (await this.real()).isVisible();

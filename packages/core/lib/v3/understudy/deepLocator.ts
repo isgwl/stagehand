@@ -4,6 +4,7 @@ import type { Page } from "./page.js";
 import { FrameLocator, frameLocatorFromFrame } from "./frameLocator.js";
 import { StagehandInvalidArgumentError } from "../types/public/sdkErrors.js";
 import { IFRAME_STEP_RE } from "./a11y/snapshot/focusSelectors.js";
+import type { HumanBehaviorInput } from "../types/public/page.js";
 
 type Axis = "child" | "desc";
 type Step = { axis: Axis; raw: string; name: string };
@@ -128,19 +129,23 @@ export class DeepLocatorDelegate {
   async click(options?: {
     button?: "left" | "right" | "middle";
     clickCount?: number;
+    humanBehavior?: HumanBehaviorInput;
   }) {
     return (await this.real()).click(options);
   }
   async count() {
     return (await this.real()).count();
   }
-  async hover() {
-    return (await this.real()).hover();
+  async hover(options?: { humanBehavior?: HumanBehaviorInput }) {
+    return (await this.real()).hover(options);
   }
   async fill(value: string) {
     return (await this.real()).fill(value);
   }
-  async type(text: string, options?: { delay?: number }) {
+  async type(
+    text: string,
+    options?: { delay?: number; humanBehavior?: HumanBehaviorInput },
+  ) {
     return (await this.real()).type(text, options);
   }
   async selectOption(values: string | string[]) {
@@ -148,6 +153,9 @@ export class DeepLocatorDelegate {
   }
   async scrollTo(percent: number | string) {
     return (await this.real()).scrollTo(percent);
+  }
+  async scrollIntoView(options?: { humanBehavior?: HumanBehaviorInput }) {
+    return (await this.real()).scrollIntoView(options);
   }
   async isVisible() {
     return (await this.real()).isVisible();
