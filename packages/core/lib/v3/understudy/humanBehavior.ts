@@ -10,7 +10,7 @@ import type {
 } from "../types/public/page.js";
 import type { MouseButton } from "../types/public/locator.js";
 
-type RandomFn = () => number;
+export type RandomFn = () => number;
 
 export type ResolvedHumanBehavior = {
   enabled: boolean;

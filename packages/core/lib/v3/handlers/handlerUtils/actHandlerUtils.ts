@@ -175,12 +175,7 @@ async function scrollIntoView(
     level: 2,
     auxiliary: { xpath: { value: xpath, type: "string" } },
   });
-  const { objectId } = await locator.resolveNode();
-  const ownerSession = locator.getFrame().session;
-  await ownerSession.send("DOM.scrollIntoViewIfNeeded", { objectId });
-  await ownerSession
-    .send("Runtime.releaseObject", { objectId })
-    .catch(() => {});
+  await locator.scrollIntoView();
 }
 
 async function scrollElementToPercentage(

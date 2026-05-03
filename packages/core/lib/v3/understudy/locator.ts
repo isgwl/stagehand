@@ -17,21 +17,12 @@ import {
   StagehandElementNotFoundError,
   StagehandInvalidArgumentError,
   StagehandLocatorError,
-  ElementNotVisibleError,
 } from "../types/public/sdkErrors.js";
 import { normalizeInputFiles } from "./fileUploadUtils.js";
 import { SetInputFilesArgument, MouseButton } from "../types/public/locator.js";
 import { NormalizedFilePayload } from "../types/private/locator.js";
 import type { HumanBehaviorInput } from "../types/public/page.js";
-import {
-  dispatchHumanClick,
-  dispatchHumanMouseMove,
-  maybeHumanDelay,
-  normalizeHumanBehavior,
-  randomForBehavior,
-  resolveDelay,
-  sleep,
-} from "./humanBehavior.js";
+import { InteractionDispatcher } from "./interactionDispatcher.js";
 
 const MAX_REMOTE_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB guard copied from Playwright
 
@@ -72,6 +63,13 @@ export class Locator {
     this.selectorQuery = FrameSelectorResolver.parseSelector(selector);
     const normalized = Number.isFinite(nthIndex) ? Math.floor(nthIndex) : -1;
     this.nthIndex = normalized < 0 ? -1 : normalized;
+  }
+
+  private interactions(): InteractionDispatcher {
+    return new InteractionDispatcher({
+      humanBehavior: this.frame.getHumanBehavior(),
+      pointerState: this.frame.getPointerState(),
+    });
   }
 
   /** Return the owning Frame for this locator (typed accessor, no private access). */
@@ -256,17 +254,19 @@ export class Locator {
   public async centroid(): Promise<{ x: number; y: number }> {
     const session = this.frame.session;
     const { objectId } = await this.resolveNode();
+    const interactions = this.interactions();
     try {
-      await session
-        .send("DOM.scrollIntoViewIfNeeded", { objectId })
-        .catch(() => {});
-      const box = await session.send<Protocol.DOM.GetBoxModelResponse>(
-        "DOM.getBoxModel",
-        { objectId },
-      );
-      if (!box.model) throw new ElementNotVisibleError(this.selector);
-      const { cx, cy } = this.centerFromBoxContent(box.model.content);
-      return { x: Math.round(cx), y: Math.round(cy) };
+      await interactions.scrollIntoView({
+        session,
+        objectId,
+        required: false,
+      });
+      const { x, y } = await interactions.elementCenter({
+        session,
+        objectId,
+        selector: this.selector,
+      });
+      return { x: Math.round(x), y: Math.round(y) };
     } finally {
       await session
         .send<never>("Runtime.releaseObject", { objectId })
@@ -294,9 +294,11 @@ export class Locator {
 
     try {
       await session.send("Overlay.enable").catch(() => {});
-      await session
-        .send("DOM.scrollIntoViewIfNeeded", { objectId })
-        .catch(() => {});
+      await this.interactions().scrollIntoView({
+        session,
+        objectId,
+        required: false,
+      });
 
       // Prefer backendNodeId to keep highlight stable even if objectId is released.
       await session.send("DOM.enable").catch(() => {});
@@ -359,34 +361,24 @@ export class Locator {
   async hover(options?: { humanBehavior?: HumanBehaviorInput }): Promise<void> {
     const session = this.frame.session;
     const { objectId } = await this.resolveNode();
+    const interactions = this.interactions();
     try {
-      await session
-        .send("DOM.scrollIntoViewIfNeeded", { objectId })
-        .catch(() => {});
-
-      const box = await session.send<Protocol.DOM.GetBoxModelResponse>(
-        "DOM.getBoxModel",
-        { objectId },
-      );
-      if (!box.model) throw new ElementNotVisibleError(this.selector);
-      const { cx, cy } = this.centerFromBoxContent(box.model.content);
-
-      const behavior = normalizeHumanBehavior(
-        this.frame.getHumanBehavior(),
-        options?.humanBehavior,
-      );
-      const random = randomForBehavior(behavior);
-      const pointerState = this.frame.getPointerState();
-      await maybeHumanDelay(behavior, random);
-      await dispatchHumanMouseMove({
+      await interactions.scrollIntoView({
         session,
-        behavior,
-        random,
-        from: pointerState?.get(session),
-        to: { x: cx, y: cy },
-        button: "none",
+        objectId,
+        humanBehavior: options?.humanBehavior,
+        required: false,
       });
-      pointerState?.set(session, { x: cx, y: cy });
+      const point = await interactions.elementCenter({
+        session,
+        objectId,
+        selector: this.selector,
+      });
+      await interactions.hover({
+        session,
+        point,
+        humanBehavior: options?.humanBehavior,
+      });
     } finally {
       await session
         .send<never>("Runtime.releaseObject", { objectId })
@@ -398,9 +390,9 @@ export class Locator {
    * Click the element at its visual center.
    * Steps:
    *  1) Resolve selector to { objectId } in the frame world.
-   *  2) Scroll into view via `DOM.scrollIntoViewIfNeeded({ objectId })`.
+   *  2) Scroll into view through the configured interaction dispatcher.
    *  3) Read geometry via `DOM.getBoxModel({ objectId })` → compute a center point.
-   *  4) Synthesize mouse press + release via `Input.dispatchMouseEvent`.
+   *  4) Dispatch the click through raw or human-like pointer input.
    */
   async click(options?: {
     button?: MouseButton;
@@ -412,81 +404,27 @@ export class Locator {
 
     const button = options?.button ?? "left";
     const clickCount = options?.clickCount ?? 1;
+    const interactions = this.interactions();
 
     try {
-      // Scroll into view using objectId (avoids frontend nodeId dependence)
-      await session.send("DOM.scrollIntoViewIfNeeded", { objectId });
-
-      // Get geometry using objectId
-      const box = await session.send<Protocol.DOM.GetBoxModelResponse>(
-        "DOM.getBoxModel",
-        { objectId },
-      );
-      if (!box.model) throw new ElementNotVisibleError(this.selector);
-      const { cx, cy } = this.centerFromBoxContent(box.model.content);
-      const behavior = normalizeHumanBehavior(
-        this.frame.getHumanBehavior(),
-        options?.humanBehavior,
-      );
-      const random = randomForBehavior(behavior);
-      const pointerState = this.frame.getPointerState();
-      await maybeHumanDelay(behavior, random);
-
-      if (behavior.enabled && behavior.mouse.enabled) {
-        await dispatchHumanMouseMove({
-          session,
-          behavior,
-          random,
-          from: pointerState?.get(session),
-          to: { x: cx, y: cy },
-          button: "none",
-        });
-        pointerState?.set(session, { x: cx, y: cy });
-        await sleep(resolveDelay(behavior.mouse.settleDelayMs, random));
-        await dispatchHumanClick({
-          session,
-          behavior,
-          random,
-          x: cx,
-          y: cy,
-          button,
-          clickCount,
-        });
-      } else {
-        // Dispatch click events in a pipelined burst to reduce inter-click delay
-        // from network/CPU jitter between round trips.
-        const dispatches: Array<Promise<unknown>> = [];
-        dispatches.push(
-          session.send<never>("Input.dispatchMouseEvent", {
-            type: "mouseMoved",
-            x: cx,
-            y: cy,
-            button: "none",
-          } as Protocol.Input.DispatchMouseEventRequest),
-        );
-        for (let i = 1; i <= clickCount; i++) {
-          dispatches.push(
-            session.send<never>("Input.dispatchMouseEvent", {
-              type: "mousePressed",
-              x: cx,
-              y: cy,
-              button,
-              clickCount: i,
-            } as Protocol.Input.DispatchMouseEventRequest),
-          );
-          dispatches.push(
-            session.send<never>("Input.dispatchMouseEvent", {
-              type: "mouseReleased",
-              x: cx,
-              y: cy,
-              button,
-              clickCount: i,
-            } as Protocol.Input.DispatchMouseEventRequest),
-          );
-        }
-        await Promise.all(dispatches);
-        pointerState?.set(session, { x: cx, y: cy });
-      }
+      await interactions.scrollIntoView({
+        session,
+        objectId,
+        humanBehavior: options?.humanBehavior,
+        includeActionDelay: false,
+      });
+      const point = await interactions.elementCenter({
+        session,
+        objectId,
+        selector: this.selector,
+      });
+      await interactions.click({
+        session,
+        point,
+        button,
+        clickCount,
+        humanBehavior: options?.humanBehavior,
+      });
     } finally {
       // release the element handle
       try {
@@ -516,9 +454,11 @@ export class Locator {
     const composed = options?.composed ?? true;
     const detail = options?.detail ?? 1;
     try {
-      await session
-        .send("DOM.scrollIntoViewIfNeeded", { objectId })
-        .catch(() => {});
+      await this.interactions().scrollIntoView({
+        session,
+        objectId,
+        required: false,
+      });
       await session.send<Protocol.Runtime.CallFunctionOnResponse>(
         "Runtime.callFunctionOn",
         {
@@ -532,6 +472,24 @@ export class Locator {
           returnByValue: true,
         },
       );
+    } finally {
+      await session
+        .send<never>("Runtime.releaseObject", { objectId })
+        .catch(() => {});
+    }
+  }
+
+  async scrollIntoView(options?: {
+    humanBehavior?: HumanBehaviorInput;
+  }): Promise<void> {
+    const session = this.frame.session;
+    const { objectId } = await this.resolveNode();
+    try {
+      await this.interactions().scrollIntoView({
+        session,
+        objectId,
+        humanBehavior: options?.humanBehavior,
+      });
     } finally {
       await session
         .send<never>("Runtime.releaseObject", { objectId })
@@ -664,7 +622,11 @@ export class Locator {
             nativeVirtualKeyCode: 8,
           } as Protocol.Input.DispatchKeyEventRequest);
         } else {
-          await session.send<never>("Input.insertText", { text: valueToType });
+          await this.interactions().type({
+            session,
+            text: valueToType,
+            preferInsertText: true,
+          });
         }
 
         return;
@@ -717,42 +679,13 @@ export class Locator {
         },
       );
 
-      const behavior = normalizeHumanBehavior(
-        this.frame.getHumanBehavior(),
-        options?.humanBehavior,
-      );
-      const random = randomForBehavior(behavior);
-      const useHumanTyping =
-        behavior.enabled && behavior.typing.enabled && options?.delay == null;
-      await maybeHumanDelay(behavior, random);
-
-      if (!options?.delay && !useHumanTyping) {
-        await session.send<never>("Input.insertText", { text });
-        return;
-      }
-
-      for (const ch of text) {
-        await session.send<never>("Input.dispatchKeyEvent", {
-          type: "keyDown",
-          text: ch,
-          key: ch,
-        } as Protocol.Input.DispatchKeyEventRequest);
-
-        await session.send<never>("Input.dispatchKeyEvent", {
-          type: "keyUp",
-          text: ch,
-          key: ch,
-        } as Protocol.Input.DispatchKeyEventRequest);
-
-        if (useHumanTyping) {
-          await sleep(resolveDelay(behavior.typing.delayMs, random));
-          if (ch === " ") {
-            await sleep(resolveDelay(behavior.typing.wordPauseMs, random));
-          }
-        } else {
-          await new Promise((r) => setTimeout(r, options.delay));
-        }
-      }
+      await this.interactions().type({
+        session,
+        text,
+        delay: options?.delay,
+        humanBehavior: options?.humanBehavior,
+        preferInsertText: true,
+      });
     } finally {
       await session.send<never>("Runtime.releaseObject", { objectId });
     }
@@ -993,18 +926,5 @@ export class Locator {
       throw new StagehandElementNotFoundError([this.selector]);
     }
     return resolved;
-  }
-
-  /** Compute a center point from a BoxModel content quad */
-  private centerFromBoxContent(content: number[]): { cx: number; cy: number } {
-    // content is [x1,y1, x2,y2, x3,y3, x4,y4]
-    if (!content || content.length < 8) {
-      throw new StagehandInvalidArgumentError("Invalid box model content quad");
-    }
-    const xs = [content[0], content[2], content[4], content[6]];
-    const ys = [content[1], content[3], content[5], content[7]];
-    const cx = (xs[0] + xs[1] + xs[2] + xs[3]) / 4;
-    const cy = (ys[0] + ys[1] + ys[2] + ys[3]) / 4;
-    return { cx, cy };
   }
 }

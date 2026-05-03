@@ -58,9 +58,7 @@ import {
 import { InitScriptSource } from "../types/private/index.js";
 import { withTimeout } from "../timeoutConfig.js";
 import {
-  dispatchHumanClick,
   dispatchHumanMouseMove,
-  dispatchHumanScroll,
   HumanPointerState,
   maybeHumanDelay,
   normalizeHumanBehavior,
@@ -68,6 +66,7 @@ import {
   resolveDelay,
   sleep,
 } from "./humanBehavior.js";
+import { InteractionDispatcher } from "./interactionDispatcher.js";
 
 /**
  * Page
@@ -301,6 +300,14 @@ export class Page {
     return { behavior, random: randomForBehavior(behavior) };
   }
 
+  private interactions(): InteractionDispatcher {
+    return new InteractionDispatcher({
+      humanBehavior: this.humanBehavior,
+      pointerState: this.pointerState,
+      updateCursor: (x, y) => this.updateCursor(x, y),
+    });
+  }
+
   private async movePointer(
     x: number,
     y: number,
@@ -309,21 +316,14 @@ export class Page {
       button?: "left" | "right" | "middle" | "none";
       buttons?: number;
     },
-  ): Promise<ReturnType<Page["resolveHumanBehavior"]>> {
-    const resolved = this.resolveHumanBehavior(options?.humanBehavior);
-    await maybeHumanDelay(resolved.behavior, resolved.random);
-    await dispatchHumanMouseMove({
+  ): ReturnType<InteractionDispatcher["movePointer"]> {
+    return this.interactions().movePointer({
       session: this.mainSession,
-      behavior: resolved.behavior,
-      random: resolved.random,
-      from: this.pointerState.get(this.mainSession),
-      to: { x, y },
+      point: { x, y },
+      humanBehavior: options?.humanBehavior,
       button: options?.button,
       buttons: options?.buttons,
-      updateCursor: (cx, cy) => this.updateCursor(cx, cy),
     });
-    this.pointerState.set(this.mainSession, { x, y });
-    return resolved;
   }
 
   public async addInitScript<Arg>(
@@ -1526,60 +1526,13 @@ export class Page {
       }
     }
 
-    const { behavior, random } = this.resolveHumanBehavior(
-      options?.humanBehavior,
-    );
-    if (behavior.enabled && behavior.mouse.enabled) {
-      await this.movePointer(x, y, {
-        humanBehavior: options?.humanBehavior,
-        button: "none",
-      });
-      await sleep(resolveDelay(behavior.mouse.settleDelayMs, random));
-      await dispatchHumanClick({
-        session: this.mainSession,
-        behavior,
-        random,
-        x,
-        y,
-        button,
-        clickCount,
-      });
-    } else {
-      await this.updateCursor(x, y);
-      // Dispatch click events in a pipelined burst to reduce inter-click delay
-      // from network/CPU jitter between round trips.
-      const dispatches: Array<Promise<unknown>> = [];
-      dispatches.push(
-        this.mainSession.send<never>("Input.dispatchMouseEvent", {
-          type: "mouseMoved",
-          x,
-          y,
-          button: "none",
-        } as Protocol.Input.DispatchMouseEventRequest),
-      );
-      for (let i = 1; i <= clickCount; i++) {
-        dispatches.push(
-          this.mainSession.send<never>("Input.dispatchMouseEvent", {
-            type: "mousePressed",
-            x,
-            y,
-            button,
-            clickCount: i,
-          } as Protocol.Input.DispatchMouseEventRequest),
-        );
-        dispatches.push(
-          this.mainSession.send<never>("Input.dispatchMouseEvent", {
-            type: "mouseReleased",
-            x,
-            y,
-            button,
-            clickCount: i,
-          } as Protocol.Input.DispatchMouseEventRequest),
-        );
-      }
-      await Promise.all(dispatches);
-      this.pointerState.set(this.mainSession, { x, y });
-    }
+    await this.interactions().click({
+      session: this.mainSession,
+      point: { x, y },
+      button,
+      clickCount,
+      humanBehavior: options?.humanBehavior,
+    });
 
     return xpathResult ?? "";
   }
@@ -1629,9 +1582,10 @@ export class Page {
       }
     }
 
-    await this.movePointer(x, y, {
+    await this.interactions().hover({
+      session: this.mainSession,
+      point: { x, y },
       humanBehavior: options?.humanBehavior,
-      button: "none",
     });
 
     return xpathResult ?? "";
@@ -1655,19 +1609,12 @@ export class Page {
       }
     }
 
-    const { behavior, random } = await this.movePointer(x, y, {
-      humanBehavior: options?.humanBehavior,
-      button: "none",
-    });
-
-    await dispatchHumanScroll({
+    await this.interactions().scroll({
       session: this.mainSession,
-      behavior,
-      random,
-      x,
-      y,
+      point: { x, y },
       deltaX,
       deltaY,
+      humanBehavior: options?.humanBehavior,
     });
 
     return xpathResult ?? "";
@@ -1809,138 +1756,13 @@ export class Page {
       humanBehavior?: HumanBehaviorInput;
     },
   ): Promise<void> {
-    const { behavior, random } = this.resolveHumanBehavior(
-      options?.humanBehavior,
-    );
-    await maybeHumanDelay(behavior, random);
-    const useHumanTyping =
-      behavior.enabled && behavior.typing.enabled && options?.delay == null;
-    const delay = Math.max(0, options?.delay ?? 0);
-    const mistakeChance =
-      options?.withMistakes === true
-        ? 0.12
-        : useHumanTyping
-          ? behavior.typing.mistakeChance
-          : 0;
-
-    const keyStroke = async (
-      ch: string,
-      override?: {
-        key?: string;
-        code?: string;
-        windowsVirtualKeyCode?: number;
-      },
-    ) => {
-      if (override) {
-        const base: Protocol.Input.DispatchKeyEventRequest = {
-          type: "keyDown",
-          key: override.key,
-          code: override.code,
-          windowsVirtualKeyCode: override.windowsVirtualKeyCode,
-        } as Protocol.Input.DispatchKeyEventRequest;
-        await this.mainSession.send("Input.dispatchKeyEvent", base);
-        await this.mainSession.send("Input.dispatchKeyEvent", {
-          ...base,
-          type: "keyUp",
-        } as Protocol.Input.DispatchKeyEventRequest);
-        return;
-      }
-
-      // Printable character: include key, code, and text for maximum compatibility
-      // Some sites (like Wordle) check event.key rather than relying on text input
-      const isLetter = /^[a-zA-Z]$/.test(ch);
-      const isDigit = /^[0-9]$/.test(ch);
-
-      let key = ch;
-      let code = "";
-      let windowsVirtualKeyCode: number | undefined;
-
-      if (isLetter) {
-        // For letters, key is the character, code is KeyX where X is uppercase
-        key = ch;
-        code = `Key${ch.toUpperCase()}`;
-        windowsVirtualKeyCode = ch.toUpperCase().charCodeAt(0);
-      } else if (isDigit) {
-        key = ch;
-        code = `Digit${ch}`;
-        windowsVirtualKeyCode = ch.charCodeAt(0);
-      } else if (ch === " ") {
-        key = " ";
-        code = "Space";
-        windowsVirtualKeyCode = 32;
-      }
-
-      const down: Protocol.Input.DispatchKeyEventRequest = {
-        type: "keyDown",
-        key,
-        code: code || undefined,
-        text: ch,
-        unmodifiedText: ch,
-        windowsVirtualKeyCode,
-      };
-      await this.mainSession.send("Input.dispatchKeyEvent", down);
-      await this.mainSession.send("Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key,
-        code: code || undefined,
-        windowsVirtualKeyCode,
-      } as Protocol.Input.DispatchKeyEventRequest);
-    };
-
-    const pressBackspace = async () =>
-      keyStroke("\b", {
-        key: "Backspace",
-        code: "Backspace",
-        windowsVirtualKeyCode: 8,
-      });
-
-    const randomPrintable = (avoid: string): string => {
-      const pool =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,;:'\"!?@#$%^&*()-_=+[]{}<>/\\|`~";
-      let c = avoid;
-      while (c === avoid) {
-        c = pool[Math.floor(random() * pool.length)];
-      }
-      return c;
-    };
-
-    for (const ch of text) {
-      // Control keys that we explicitly map
-      if (ch === "\n" || ch === "\r") {
-        await keyStroke(ch, {
-          key: "Enter",
-          code: "Enter",
-          windowsVirtualKeyCode: 13,
-        });
-      } else if (ch === "\t") {
-        await keyStroke(ch, {
-          key: "Tab",
-          code: "Tab",
-          windowsVirtualKeyCode: 9,
-        });
-      } else {
-        if (mistakeChance > 0 && random() < mistakeChance) {
-          // Type a wrong character, then backspace to correct
-          const wrong = randomPrintable(ch);
-          await keyStroke(wrong);
-          if (useHumanTyping) {
-            await sleep(resolveDelay(behavior.typing.mistakeDelayMs, random));
-          } else if (delay) await sleep(delay);
-          await pressBackspace();
-          if (useHumanTyping) {
-            await sleep(resolveDelay(behavior.typing.mistakeDelayMs, random));
-          } else if (delay) await sleep(delay);
-        }
-        await keyStroke(ch);
-      }
-
-      if (useHumanTyping) {
-        await sleep(resolveDelay(behavior.typing.delayMs, random));
-        if (ch === " ") {
-          await sleep(resolveDelay(behavior.typing.wordPauseMs, random));
-        }
-      } else if (delay) await sleep(delay);
-    }
+    await this.interactions().type({
+      session: this.mainSession,
+      text,
+      delay: options?.delay,
+      withMistakes: options?.withMistakes,
+      humanBehavior: options?.humanBehavior,
+    });
   }
 
   /**
