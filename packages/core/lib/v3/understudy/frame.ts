@@ -13,6 +13,8 @@ interface FrameManager {
   pageId: string;
 }
 
+type CursorUpdater = (x: number, y: number) => Promise<void>;
+
 /**
  * Frame
  *
@@ -32,6 +34,7 @@ export class Frame implements FrameManager {
     private readonly remoteBrowser: boolean,
     private readonly humanBehavior?: HumanBehaviorInput,
     private readonly pointerState?: HumanPointerState,
+    private readonly updateCursor?: CursorUpdater,
   ) {
     this.sessionId = this.session.id ?? null;
   }
@@ -47,6 +50,10 @@ export class Frame implements FrameManager {
 
   public getPointerState(): HumanPointerState | undefined {
     return this.pointerState;
+  }
+
+  public getCursorUpdater(): CursorUpdater | undefined {
+    return this.updateCursor;
   }
 
   /** DOM.getNodeForLocation → DOM.describeNode */
@@ -263,6 +270,7 @@ export class Frame implements FrameManager {
             this.remoteBrowser,
             this.humanBehavior,
             this.pointerState,
+            this.updateCursor,
           ),
         );
       }

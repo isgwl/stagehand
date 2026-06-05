@@ -69,6 +69,7 @@ export class Locator {
     return new InteractionDispatcher({
       humanBehavior: this.frame.getHumanBehavior(),
       pointerState: this.frame.getPointerState(),
+      updateCursor: this.frame.getCursorUpdater(),
     });
   }
 

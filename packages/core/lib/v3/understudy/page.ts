@@ -154,6 +154,7 @@ export class Page {
       this.browserIsRemote,
       this.humanBehavior,
       this.pointerState,
+      (x, y) => this.updateCursor(x, y),
     );
 
     this.networkManager = new NetworkManager();
@@ -446,6 +447,7 @@ export class Page {
         this.browserIsRemote,
         this.humanBehavior,
         this.pointerState,
+        (x, y) => this.updateCursor(x, y),
       );
     }
 
@@ -596,6 +598,7 @@ export class Page {
       this.browserIsRemote,
       this.humanBehavior,
       this.pointerState,
+      (x, y) => this.updateCursor(x, y),
     );
     this.frameCache.set(frameId, f);
     return f;

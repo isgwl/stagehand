@@ -162,6 +162,12 @@ const presets: Record<
   },
 };
 
+const MAX_MOUSE_STEPS = 256;
+const MAX_DELAY_MS = 60_000;
+const MAX_MOUSE_JITTER = 100;
+const MAX_SCROLL_JITTER = 1;
+const MAX_MISTAKE_CHANCE = 1;
+
 export function normalizeHumanBehavior(
   base?: HumanBehaviorInput,
   override?: HumanBehaviorInput,
@@ -194,12 +200,114 @@ function normalizeSingleHumanBehavior(
   const preset = presets[input.preset ?? "balanced"];
   return {
     enabled: true,
-    seed: input.seed,
-    mouse: { ...preset.mouse, ...input.mouse },
-    typing: { ...preset.typing, ...input.typing },
-    scroll: { ...preset.scroll, ...input.scroll },
-    actionDelayMs: input.actionDelayMs ?? preset.actionDelayMs,
+    seed: finiteOptional(input.seed),
+    mouse: normalizeMouseOptions(preset.mouse, input.mouse),
+    typing: normalizeTypingOptions(preset.typing, input.typing),
+    scroll: normalizeScrollOptions(preset.scroll, input.scroll),
+    actionDelayMs: normalizeDelay(input.actionDelayMs, preset.actionDelayMs),
   };
+}
+
+function normalizeMouseOptions(
+  preset: Required<HumanMouseOptions>,
+  input?: HumanMouseOptions,
+): Required<HumanMouseOptions> {
+  return {
+    enabled: input?.enabled ?? preset.enabled,
+    durationMs: normalizeDelay(input?.durationMs, preset.durationMs),
+    steps: normalizeInteger(input?.steps, preset.steps, 1, MAX_MOUSE_STEPS),
+    jitter: normalizeNumber(input?.jitter, preset.jitter, 0, MAX_MOUSE_JITTER),
+    overshoot: input?.overshoot ?? preset.overshoot,
+    settleDelayMs: normalizeDelay(input?.settleDelayMs, preset.settleDelayMs),
+    pressDelayMs: normalizeDelay(input?.pressDelayMs, preset.pressDelayMs),
+    clickDelayMs: normalizeDelay(input?.clickDelayMs, preset.clickDelayMs),
+  };
+}
+
+function normalizeTypingOptions(
+  preset: Required<HumanTypingOptions>,
+  input?: HumanTypingOptions,
+): Required<HumanTypingOptions> {
+  return {
+    enabled: input?.enabled ?? preset.enabled,
+    delayMs: normalizeDelay(input?.delayMs, preset.delayMs),
+    wordPauseMs: normalizeDelay(input?.wordPauseMs, preset.wordPauseMs),
+    mistakeChance: normalizeNumber(
+      input?.mistakeChance,
+      preset.mistakeChance,
+      0,
+      MAX_MISTAKE_CHANCE,
+    ),
+    mistakeDelayMs: normalizeDelay(
+      input?.mistakeDelayMs,
+      preset.mistakeDelayMs,
+    ),
+  };
+}
+
+function normalizeScrollOptions(
+  preset: Required<HumanScrollOptions>,
+  input?: HumanScrollOptions,
+): Required<HumanScrollOptions> {
+  return {
+    enabled: input?.enabled ?? preset.enabled,
+    chunkSize: normalizeDelay(input?.chunkSize, preset.chunkSize, 1),
+    delayMs: normalizeDelay(input?.delayMs, preset.delayMs),
+    jitter: normalizeNumber(input?.jitter, preset.jitter, 0, MAX_SCROLL_JITTER),
+  };
+}
+
+function normalizeDelay(
+  value: HumanDelay | undefined,
+  fallback: HumanDelay,
+  minValue = 0,
+): HumanDelay {
+  if (typeof value === "number") {
+    return normalizeNumber(value, fallbackDelayNumber(fallback), minValue);
+  }
+  if (!value || typeof value !== "object") return fallback;
+
+  const fallbackMin =
+    typeof fallback === "number"
+      ? fallback
+      : Math.min(fallback.min, fallback.max);
+  const fallbackMax =
+    typeof fallback === "number"
+      ? fallback
+      : Math.max(fallback.min, fallback.max);
+  const min = normalizeNumber(value.min, fallbackMin, minValue);
+  const max = normalizeNumber(value.max, fallbackMax, minValue);
+  return { min: Math.min(min, max), max: Math.max(min, max) };
+}
+
+function normalizeInteger(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return Math.floor(normalizeNumber(value, fallback, min, max));
+}
+
+function normalizeNumber(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max = MAX_DELAY_MS,
+): number {
+  const candidate = typeof value === "number" ? value : fallback;
+  const finite = Number.isFinite(candidate) ? candidate : fallback;
+  return Math.max(min, Math.min(max, finite));
+}
+
+function finiteOptional(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function fallbackDelayNumber(fallback: HumanDelay): number {
+  return typeof fallback === "number" ? fallback : fallback.min;
 }
 
 export function randomForBehavior(behavior: ResolvedHumanBehavior): RandomFn {
@@ -345,14 +453,19 @@ export async function dispatchHumanScroll(args: {
   );
   const chunks = Math.max(1, Math.ceil(maxMagnitude / baseChunkSize));
 
+  let sentX = 0;
+  let sentY = 0;
+
   for (let i = 1; i <= chunks; i++) {
-    const remainingX = deltaX - (deltaX / chunks) * (i - 1);
-    const remainingY = deltaY - (deltaY / chunks) * (i - 1);
+    const remainingX = deltaX - sentX;
+    const remainingY = deltaY - sentY;
     const jitter = 1 + (random() * 2 - 1) * behavior.scroll.jitter;
     const chunkX =
       i === chunks ? remainingX : (deltaX / chunks) * Math.max(0.1, jitter);
     const chunkY =
       i === chunks ? remainingY : (deltaY / chunks) * Math.max(0.1, jitter);
+    sentX += chunkX;
+    sentY += chunkY;
 
     await session.send<never>("Input.dispatchMouseEvent", {
       type: "mouseWheel",

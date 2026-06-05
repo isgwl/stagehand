@@ -188,37 +188,29 @@ export class InteractionDispatcher {
     }
 
     await this.options.updateCursor?.(args.point.x, args.point.y);
-    const dispatches: Array<Promise<unknown>> = [
-      args.session.send<never>("Input.dispatchMouseEvent", {
-        type: "mouseMoved",
-        x: args.point.x,
-        y: args.point.y,
-        button: "none",
-      } as Protocol.Input.DispatchMouseEventRequest),
-    ];
+    await args.session.send<never>("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: args.point.x,
+      y: args.point.y,
+      button: "none",
+    } as Protocol.Input.DispatchMouseEventRequest);
 
     for (let i = 1; i <= args.clickCount; i++) {
-      dispatches.push(
-        args.session.send<never>("Input.dispatchMouseEvent", {
-          type: "mousePressed",
-          x: args.point.x,
-          y: args.point.y,
-          button: args.button,
-          clickCount: i,
-        } as Protocol.Input.DispatchMouseEventRequest),
-      );
-      dispatches.push(
-        args.session.send<never>("Input.dispatchMouseEvent", {
-          type: "mouseReleased",
-          x: args.point.x,
-          y: args.point.y,
-          button: args.button,
-          clickCount: i,
-        } as Protocol.Input.DispatchMouseEventRequest),
-      );
+      await args.session.send<never>("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: args.point.x,
+        y: args.point.y,
+        button: args.button,
+        clickCount: i,
+      } as Protocol.Input.DispatchMouseEventRequest);
+      await args.session.send<never>("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: args.point.x,
+        y: args.point.y,
+        button: args.button,
+        clickCount: i,
+      } as Protocol.Input.DispatchMouseEventRequest);
     }
-
-    await Promise.all(dispatches);
     this.options.pointerState?.set(args.session, args.point);
   }
 
